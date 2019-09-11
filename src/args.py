@@ -67,7 +67,7 @@ def get_parser():
     parser.add_argument('--transf_layers_ingrs', type=int, default=4,
                         help='number of transformer layers in the ingredient decoder')
 
-    parser.add_argument('--num_epochs', type=int, default=400,
+    parser.add_argument('--num_epochs', type=int, default=10,
                         help='maximum number of epochs')
 
     parser.add_argument('--batch_size', type=int, default=128)
