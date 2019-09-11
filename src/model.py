@@ -97,29 +97,38 @@ class RecipeScorer(nn.Module):
     def __init__(self, embed_dim=512, ingr_vocab_size=1488):
         super(RecipeScorer, self).__init__()
         # FC for images
-        self.fc1 = nn.Linear(embed_dim, embed_dim)
+        self.fc1 = nn.Linear(embed_dim * 49, 4096)
 
         # FC for ingredients
-        self.fc2 = nn.Linear(ingr_vocab_size, embed_dim)
+        self.fc2 = nn.Linear((ingr_vocab_size -1 ) * 20, 4096)
 
         # combined FC
-        self.fc3 = nn.Linear(embed_dim * 2, 1)
+        self.fc3 = nn.Linear(4096 * 2, 1)
 
-        self.relu = nn.LeakyReLU(0.2, inplace=True)
+        self.relu = nn.LeakyReLU(0.1, inplace=True)
         self.tanh = nn.Tanh()
 
     def forward(self, img_features, ingr_logits):
+        # print("img_features", img_features)
+        # print("ingr_logits", ingr_logits.shape)
+        # print("img_features:", img_features.shape)
+        # print("img_features (reshaped):", img_features.view((img_features.shape[0], -1)).shape)
+        # print("ingr_logits (reshaped):", ingr_logits.view((ingr_logits.shape[0], -1)).shape)
         # process the images
-        f1 = self.dropout(self.relu(self.fc1(img_features)))
+        f1 = self.relu(self.fc1(img_features.view((img_features.shape[0], -1))))
+        # print("f1", f1)
 
         # process the ingredients
-        f2 = self.relu(self.fc2(ingr_logits))
+        f2 = self.relu(self.fc2(ingr_logits.view((ingr_logits.shape[0], -1))))
+        # print("f2", f2)
 
         # combine the embeddings
-        combined = torch.cat((f1, f2))
+        combined = torch.cat((f1, f2), 1)
+        # print("combined", combined.shape)
 
         # feed the combined into the final layer
         f3 = self.fc3(combined)
+        # print("f3:", f3)
 
         return self.tanh(f3)
 
@@ -174,12 +183,14 @@ class InverseCookingModel(nn.Module):
                                                                    temperature=1.0, img_features=img_features,
                                                                    first_token_value=0, replacement=False)
 
-            scores = self.scorer(img_features, ingr_logits)
-            # get the loss for the scores
-            score_loss = self.crit_score(scores, gt_scores)
-            losses['score_loss'] = score_loss
+            ingr_logits = torch.nn.functional.softmax(ingr_logits, dim=-1)
 
-            # ingr_logits = torch.nn.functional.softmax(ingr_logits, dim=-1)
+            scores = self.scorer(img_features, ingr_logits)
+            # print("gt_scores", gt_scores)
+            # print("scores", scores)
+            # get the loss for the scores
+            score_loss = self.crit_score(scores.view(-1), gt_scores.float())
+            losses['score_loss'] = score_loss
 
             # find idxs for eos ingredient
             # eos probability is the one assigned to the first position of the softmax

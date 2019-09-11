@@ -8,13 +8,13 @@ def get_parser():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--save_dir', type=str, default='path/to/save/models',
+    parser.add_argument('--save_dir', type=str, default='../data',
                         help='path where checkpoints will be saved')
 
-    parser.add_argument('--project_name', type=str, default='inversecooking',
+    parser.add_argument('--project_name', type=str, default='recipescorer',
                         help='name of the directory where models will be saved within save_dir')
 
-    parser.add_argument('--model_name', type=str, default='model',
+    parser.add_argument('--model_name', type=str, default='modelbest',
                         help='save_dir/project_name/model_name will be the path where logs and checkpoints are stored')
 
     parser.add_argument('--transfer_from', type=str, default='',

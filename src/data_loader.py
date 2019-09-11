@@ -20,6 +20,7 @@ scores = pd.read_csv("../data/scored_images.csv")
 class ScorerDataset(datasets.ImageFolder):
     def __init__(self, data_dir, aux_data_dir, transform=None, suff=''):
         self.ingrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'ingr_vocab.pkl'), 'rb'))
+        self.instrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'instr_vocab.pkl'), 'rb'))
         super(ScorerDataset, self).__init__(root=data_dir, transform=transform)
 
     def __getitem__(self, index):
@@ -30,7 +31,7 @@ class ScorerDataset(datasets.ImageFolder):
 
         # get the label from the data
         try:
-            target = scores[scores['FILE_NAME'] == path.split("/")[-1]]['MNS9_NORM'].values[0]
+            target = scores[scores['FILE_NAME'] == path.split("\\")[-1]]['MNS9_NORM'].values[0].astype(float)
         except:
             print("Path:", path)
 
@@ -40,7 +41,7 @@ class ScorerDataset(datasets.ImageFolder):
         return self.instrs_vocab
 
     def get_instrs_vocab_size(self):
-        return 5 #len(self.instrs_vocab)
+        return len(self.instrs_vocab)
 
     def get_ingrs_vocab(self):
         return [min(w, key=len) if not isinstance(w, str) else w for w in

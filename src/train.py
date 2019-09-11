@@ -138,6 +138,7 @@ def main(args):
 
     # Build the model
     model = get_model(args, ingr_vocab_size, instrs_vocab_size)
+    model.load_state_dict(torch.load("../data/recipescorer/modelbest.ckpt", map_location=map_loc), strict=False)
     keep_cnn_gradients = False
 
     decay_factor = 1.0
@@ -319,7 +320,7 @@ def main(args):
                 # else:
                 ingr_loss, eos_loss, card_penalty = 0, 0, 0
 
-                loss = score_loss
+                loss = losses['score_loss']
 
                 loss_dict['loss'] = loss.item()
 
