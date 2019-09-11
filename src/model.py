@@ -75,12 +75,16 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                       scale_embed_grad=False)
     # recipe loss
     criterion = MaskedCrossEntropyCriterion(ignore_index=[instrs_vocab_size-1], reduce=False)
+    crit_score = criterion = nn.MSELoss()
+
+    scorer = RecipeScorer(args.embed_size, ingr_vocab_size)
 
     # ingredients loss
     label_loss = nn.BCELoss(reduce=False)
     eos_loss = nn.BCELoss(reduce=False)
 
     model = InverseCookingModel(encoder_ingrs, decoder, ingr_decoder, encoder_image,
+                                scorer=scorer, crit_score=crit_score,
                                 crit=criterion, crit_ingr=label_loss, crit_eos=eos_loss,
                                 pad_value=ingr_vocab_size-1,
                                 ingrs_only=args.ingrs_only, recipe_only=args.recipe_only,
@@ -89,8 +93,40 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
     return model
 
 
+class RecipeScorer(nn.Module):
+    def __init__(self, embed_dim=512, ingr_vocab_size=1488):
+        super(RecipeScorer, self).__init__()
+        # FC for images
+        self.fc1 = nn.Linear(embed_dim, embed_dim)
+
+        # FC for ingredients
+        self.fc2 = nn.Linear(ingr_vocab_size, embed_dim)
+
+        # combined FC
+        self.fc3 = nn.Linear(embed_dim * 2, 1)
+
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
+        self.tanh = nn.Tanh()
+
+    def forward(self, img_features, ingr_logits):
+        # process the images
+        f1 = self.dropout(self.relu(self.fc1(img_features)))
+
+        # process the ingredients
+        f2 = self.relu(self.fc2(ingr_logits))
+
+        # combine the embeddings
+        combined = torch.cat((f1, f2))
+
+        # feed the combined into the final layer
+        f3 = self.fc3(combined)
+
+        return self.tanh(f3)
+
+
 class InverseCookingModel(nn.Module):
     def __init__(self, ingredient_encoder, recipe_decoder, ingr_decoder, image_encoder,
+                 scorer, crit_score,
                  crit=None, crit_ingr=None, crit_eos=None,
                  pad_value=0, ingrs_only=True,
                  recipe_only=False, label_smoothing=0.0):
@@ -108,89 +144,97 @@ class InverseCookingModel(nn.Module):
         self.recipe_only = recipe_only
         self.crit_eos = crit_eos
         self.label_smoothing = label_smoothing
+        self.scorer = scorer
+        self.crit_score = crit_score
 
-    def forward(self, img_inputs, captions, target_ingrs,
-                sample=False, keep_cnn_gradients=False):
+    def forward(self, img_inputs, gt_scores, sample=False, keep_cnn_gradients=False):
 
         if sample:
             return self.sample(img_inputs, greedy=True)
 
-        targets = captions[:, 1:]
-        targets = targets.contiguous().view(-1)
+        # targets = captions[:, 1:]
+        # targets = targets.contiguous().view(-1)
 
+        # output 512 features from resnet
         img_features = self.image_encoder(img_inputs, keep_cnn_gradients)
 
         losses = {}
-        target_one_hot = label2onehot(target_ingrs, self.pad_value)
-        target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value)
+        # target_one_hot = label2onehot(target_ingrs, self.pad_value)
+        # target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value)
 
         # ingredient prediction
         if not self.recipe_only:
-            target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
-            target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / target_one_hot_smooth.size(-1)
+            # target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
+            # target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / target_one_hot_smooth.size(-1)
 
             # decode ingredients with transformer
             # autoregressive mode for ingredient decoder
+            # output - ???
             ingr_ids, ingr_logits = self.ingredient_decoder.sample(None, None, greedy=True,
                                                                    temperature=1.0, img_features=img_features,
                                                                    first_token_value=0, replacement=False)
 
-            ingr_logits = torch.nn.functional.softmax(ingr_logits, dim=-1)
+            scores = self.scorer(img_features, ingr_logits)
+            # get the loss for the scores
+            score_loss = self.crit_score(scores, gt_scores)
+            losses['score_loss'] = score_loss
+
+            # ingr_logits = torch.nn.functional.softmax(ingr_logits, dim=-1)
 
             # find idxs for eos ingredient
             # eos probability is the one assigned to the first position of the softmax
-            eos = ingr_logits[:, :, 0]
-            target_eos = ((target_ingrs == 0) ^ (target_ingrs == self.pad_value))
-
-            eos_pos = (target_ingrs == 0)
-            eos_head = ((target_ingrs != self.pad_value) & (target_ingrs != 0))
-
-            # select transformer steps to pool from
-            mask_perminv = mask_from_eos(target_ingrs, eos_value=0, mult_before=False)
-            ingr_probs = ingr_logits * mask_perminv.float().unsqueeze(-1)
-
-            ingr_probs, _ = torch.max(ingr_probs, dim=1)
-
-            # ignore predicted ingredients after eos in ground truth
-            ingr_ids[mask_perminv == 0] = self.pad_value
-
-            ingr_loss = self.crit_ingr(ingr_probs, target_one_hot_smooth)
-            ingr_loss = torch.mean(ingr_loss, dim=-1)
-
-            losses['ingr_loss'] = ingr_loss
-
-            # cardinality penalty
-            losses['card_penalty'] = torch.abs((ingr_probs*target_one_hot).sum(1) - target_one_hot.sum(1)) + \
-                                     torch.abs((ingr_probs*(1-target_one_hot)).sum(1))
-
-            eos_loss = self.crit_eos(eos, target_eos.float())
-
-            mult = 1/2
-            # eos loss is only computed for timesteps <= t_eos and equally penalizes 0s and 1s
-            losses['eos_loss'] = mult*(eos_loss * eos_pos.float()).sum(1) / (eos_pos.float().sum(1) + 1e-6) + \
-                                 mult*(eos_loss * eos_head.float()).sum(1) / (eos_head.float().sum(1) + 1e-6)
-            # iou
-            pred_one_hot = label2onehot(ingr_ids, self.pad_value)
-            # iou sample during training is computed using the true eos position
-            losses['iou'] = softIoU(pred_one_hot, target_one_hot)
+            # eos = ingr_logits[:, :, 0]
+            # target_eos = ((target_ingrs == 0) ^ (target_ingrs == self.pad_value))
+            #
+            # eos_pos = (target_ingrs == 0)
+            # eos_head = ((target_ingrs != self.pad_value) & (target_ingrs != 0))
+            #
+            # # select transformer steps to pool from
+            # mask_perminv = mask_from_eos(target_ingrs, eos_value=0, mult_before=False)
+            # ingr_probs = ingr_logits * mask_perminv.float().unsqueeze(-1)
+            #
+            # ingr_probs, _ = torch.max(ingr_probs, dim=1)
+            #
+            # # ignore predicted ingredients after eos in ground truth
+            # ingr_ids[mask_perminv == 0] = self.pad_value
+            #
+            # ingr_loss = self.crit_ingr(ingr_probs, target_one_hot_smooth)
+            # ingr_loss = torch.mean(ingr_loss, dim=-1)
+            #
+            # losses['ingr_loss'] = ingr_loss
+            #
+            # # cardinality penalty
+            # losses['card_penalty'] = torch.abs((ingr_probs*target_one_hot).sum(1) - target_one_hot.sum(1)) + \
+            #                          torch.abs((ingr_probs*(1-target_one_hot)).sum(1))
+            #
+            # eos_loss = self.crit_eos(eos, target_eos.float())
+            #
+            # mult = 1/2
+            # # eos loss is only computed for timesteps <= t_eos and equally penalizes 0s and 1s
+            # losses['eos_loss'] = mult*(eos_loss * eos_pos.float()).sum(1) / (eos_pos.float().sum(1) + 1e-6) + \
+            #                      mult*(eos_loss * eos_head.float()).sum(1) / (eos_head.float().sum(1) + 1e-6)
+            # # iou
+            # pred_one_hot = label2onehot(ingr_ids, self.pad_value)
+            # # iou sample during training is computed using the true eos position
+            # losses['iou'] = softIoU(pred_one_hot, target_one_hot)
 
         if self.ingrs_only:
             return losses
 
         # encode ingredients
-        target_ingr_feats = self.ingredient_encoder(target_ingrs)
-        target_ingr_mask = mask_from_eos(target_ingrs, eos_value=0, mult_before=False)
-
-        target_ingr_mask = target_ingr_mask.float().unsqueeze(1)
-
-        outputs, ids = self.recipe_decoder(target_ingr_feats, target_ingr_mask, captions, img_features)
-
-        outputs = outputs[:, :-1, :].contiguous()
-        outputs = outputs.view(outputs.size(0) * outputs.size(1), -1)
-
-        loss = self.crit(outputs, targets)
-
-        losses['recipe_loss'] = loss
+        # target_ingr_feats = self.ingredient_encoder(target_ingrs)
+        # target_ingr_mask = mask_from_eos(target_ingrs, eos_value=0, mult_before=False)
+        #
+        # target_ingr_mask = target_ingr_mask.float().unsqueeze(1)
+        #
+        # outputs, ids = self.recipe_decoder(target_ingr_feats, target_ingr_mask, captions, img_features)
+        #
+        # outputs = outputs[:, :-1, :].contiguous()
+        # outputs = outputs.view(outputs.size(0) * outputs.size(1), -1)
+        #
+        # loss = self.crit(outputs, targets)
+        #
+        # losses['recipe_loss'] = loss
 
         return losses
 

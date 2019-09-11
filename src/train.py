@@ -16,7 +16,7 @@ import sys
 import json
 import time
 import torch.backends.cudnn as cudnn
-from utils.tb_visualizer import Visualizer
+# from utils.tb_visualizer import Visualizer
 from model import mask_from_eos, label2onehot
 from utils.metrics import softIoU, compute_metrics, update_error_types
 import random
@@ -78,8 +78,8 @@ def main(args):
     make_dir(logs_dir)
     make_dir(checkpoints_dir)
     make_dir(tb_logs)
-    if args.tensorboard:
-        logger = Visualizer(tb_logs, name='visual_results')
+    # if args.tensorboard:
+    #     logger = Visualizer(tb_logs, name='visual_results')
 
     # check if we want to resume from last checkpoint of current model
     if args.resume:
@@ -87,10 +87,10 @@ def main(args):
         args.resume = True
 
     # logs to disk
-    if not args.log_term:
-        print ("Training logs will be saved to:", os.path.join(logs_dir, 'train.log'))
-        sys.stdout = open(os.path.join(logs_dir, 'train.log'), 'w')
-        sys.stderr = open(os.path.join(logs_dir, 'train.err'), 'w')
+    # if not args.log_term:
+    #     print ("Training logs will be saved to:", os.path.join(logs_dir, 'train.log'))
+    #     sys.stdout = open(os.path.join(logs_dir, 'train.log'), 'w')
+    #     sys.stderr = open(os.path.join(logs_dir, 'train.err'), 'w')
 
     print(args)
     pickle.dump(args, open(os.path.join(checkpoints_dir, 'args.pkl'), 'wb'))
@@ -201,8 +201,8 @@ def main(args):
     for epoch in range(start, args.num_epochs):
 
         # save current epoch for resuming
-        if args.tensorboard:
-            logger.reset()
+        # if args.tensorboard:
+        #     logger.reset()
 
         args.current_epoch = epoch
         # increase / decrase values for moving params
@@ -247,77 +247,79 @@ def main(args):
 
             for i in range(total_step):
 
-                img_inputs, captions, ingr_gt, img_ids, paths = loader.next()
+                img_inputs, gt_scores = loader.next()
 
-                ingr_gt = ingr_gt.to(device)
+                # ingr_gt = ingr_gt.to(device)
                 img_inputs = img_inputs.to(device)
-                captions = captions.to(device)
-                true_caps_batch = captions.clone()[:, 1:].contiguous()
+                gt_scores = gt_scores.to(device)
+                # captions = captions.to(device)
+                # true_caps_batch = captions.clone()[:, 1:].contiguous()
                 loss_dict = {}
 
                 if split == 'val':
                     with torch.no_grad():
-                        losses = model(img_inputs, captions, ingr_gt)
+                        losses = model(img_inputs, gt_scores)
 
                         if not args.recipe_only:
-                            outputs = model(img_inputs, captions, ingr_gt, sample=True)
+                            outputs = model(img_inputs, gt_scores, sample=True)
+                            score_loss = outputs['score_loss']
 
-                            ingr_ids_greedy = outputs['ingr_ids']
+                            # ingr_ids_greedy = outputs['ingr_ids']
+                            #
+                            # mask = mask_from_eos(ingr_ids_greedy, eos_value=0, mult_before=False)
+                            # ingr_ids_greedy[mask == 0] = ingr_vocab_size-1
+                            # pred_one_hot = label2onehot(ingr_ids_greedy, ingr_vocab_size-1)
+                            # target_one_hot = label2onehot(ingr_gt, ingr_vocab_size-1)
+                            # iou_sample = softIoU(pred_one_hot, target_one_hot)
+                            # iou_sample = iou_sample.sum() / (torch.nonzero(iou_sample.data).size(0) + 1e-6)
+                            # loss_dict['score_sample'] = iou_sample.item()
 
-                            mask = mask_from_eos(ingr_ids_greedy, eos_value=0, mult_before=False)
-                            ingr_ids_greedy[mask == 0] = ingr_vocab_size-1
-                            pred_one_hot = label2onehot(ingr_ids_greedy, ingr_vocab_size-1)
-                            target_one_hot = label2onehot(ingr_gt, ingr_vocab_size-1)
-                            iou_sample = softIoU(pred_one_hot, target_one_hot)
-                            iou_sample = iou_sample.sum() / (torch.nonzero(iou_sample.data).size(0) + 1e-6)
-                            loss_dict['iou_sample'] = iou_sample.item()
-
-                            update_error_types(error_types, pred_one_hot, target_one_hot)
-
-                            del outputs, pred_one_hot, target_one_hot, iou_sample
+                            # update_error_types(error_types, pred_one_hot, target_one_hot)
+                            #
+                            # del outputs, pred_one_hot, target_one_hot, iou_sample
 
                 else:
-                    losses = model(img_inputs, captions, ingr_gt,
+                    losses = model(img_inputs, gt_scores,
                                    keep_cnn_gradients=keep_cnn_gradients)
 
-                if not args.ingrs_only:
-                    recipe_loss = losses['recipe_loss']
+                # if not args.ingrs_only:
+                #     recipe_loss = losses['recipe_loss']
+                #
+                #     recipe_loss = recipe_loss.view(true_caps_batch.size())
+                #     non_pad_mask = true_caps_batch.ne(instrs_vocab_size - 1).float()
+                #
+                #     recipe_loss = torch.sum(recipe_loss*non_pad_mask, dim=-1) / torch.sum(non_pad_mask, dim=-1)
+                #     perplexity = torch.exp(recipe_loss)
+                #
+                #     recipe_loss = recipe_loss.mean()
+                #     perplexity = perplexity.mean()
+                #
+                #     loss_dict['recipe_loss'] = recipe_loss.item()
+                #     loss_dict['perplexity'] = perplexity.item()
+                # else:
+                #     recipe_loss = 0
 
-                    recipe_loss = recipe_loss.view(true_caps_batch.size())
-                    non_pad_mask = true_caps_batch.ne(instrs_vocab_size - 1).float()
+                # This is to generate recipes from images, we don't need to do that
+                # if not args.recipe_only:
+                #
+                #     ingr_loss = losses['ingr_loss']
+                #     ingr_loss = ingr_loss.mean()
+                #     loss_dict['ingr_loss'] = ingr_loss.item()
+                #
+                #     eos_loss = losses['eos_loss']
+                #     eos_loss = eos_loss.mean()
+                #     loss_dict['eos_loss'] = eos_loss.item()
+                #
+                #     iou_seq = losses['iou']
+                #     iou_seq = iou_seq.mean()
+                #     loss_dict['iou'] = iou_seq.item()
+                #
+                #     card_penalty = losses['card_penalty'].mean()
+                #     loss_dict['card_penalty'] = card_penalty.item()
+                # else:
+                ingr_loss, eos_loss, card_penalty = 0, 0, 0
 
-                    recipe_loss = torch.sum(recipe_loss*non_pad_mask, dim=-1) / torch.sum(non_pad_mask, dim=-1)
-                    perplexity = torch.exp(recipe_loss)
-
-                    recipe_loss = recipe_loss.mean()
-                    perplexity = perplexity.mean()
-
-                    loss_dict['recipe_loss'] = recipe_loss.item()
-                    loss_dict['perplexity'] = perplexity.item()
-                else:
-                    recipe_loss = 0
-
-                if not args.recipe_only:
-
-                    ingr_loss = losses['ingr_loss']
-                    ingr_loss = ingr_loss.mean()
-                    loss_dict['ingr_loss'] = ingr_loss.item()
-
-                    eos_loss = losses['eos_loss']
-                    eos_loss = eos_loss.mean()
-                    loss_dict['eos_loss'] = eos_loss.item()
-
-                    iou_seq = losses['iou']
-                    iou_seq = iou_seq.mean()
-                    loss_dict['iou'] = iou_seq.item()
-
-                    card_penalty = losses['card_penalty'].mean()
-                    loss_dict['card_penalty'] = card_penalty.item()
-                else:
-                    ingr_loss, eos_loss, card_penalty = 0, 0, 0
-
-                loss = args.loss_weight[0] * recipe_loss + args.loss_weight[1] * ingr_loss \
-                       + args.loss_weight[2]*eos_loss + args.loss_weight[3]*card_penalty
+                loss = score_loss
 
                 loss_dict['loss'] = loss.item()
 
@@ -346,14 +348,14 @@ def main(args):
                                                                                                    elapsed_time)
                     print(strtoprint)
 
-                    if args.tensorboard:
-                        # logger.histo_summary(model=model, step=total_step * epoch + i)
-                        logger.scalar_summary(mode=split+'_iter', epoch=total_step*epoch+i,
-                                              **{k: np.mean(v[-args.log_step:]) for k, v in total_loss_dict.items() if v})
+                    # if args.tensorboard:
+                    #     # logger.histo_summary(model=model, step=total_step * epoch + i)
+                    #     logger.scalar_summary(mode=split+'_iter', epoch=total_step*epoch+i,
+                    #                           **{k: np.mean(v[-args.log_step:]) for k, v in total_loss_dict.items() if v})
 
                     torch.cuda.synchronize()
                     start = time.time()
-                del loss, losses, captions, img_inputs
+                del loss, losses
 
             if split == 'val' and not args.recipe_only:
                 ret_metrics = {'accuracy': [], 'f1': [], 'jaccard': [], 'f1_ingredients': [], 'dice': []}
@@ -362,11 +364,11 @@ def main(args):
                                 weights=None)
 
                 total_loss_dict['f1'] = ret_metrics['f1']
-            if args.tensorboard:
-                # 1. Log scalar values (scalar summary)
-                logger.scalar_summary(mode=split,
-                                      epoch=epoch,
-                                      **{k: np.mean(v) for k, v in total_loss_dict.items() if v})
+            # if args.tensorboard:
+            #     # 1. Log scalar values (scalar summary)
+            #     logger.scalar_summary(mode=split,
+            #                           epoch=epoch,
+            #                           **{k: np.mean(v) for k, v in total_loss_dict.items() if v})
 
         # Save the model's best checkpoint if performance was improved
         es_value = np.mean(total_loss_dict[args.es_metric])
@@ -385,8 +387,8 @@ def main(args):
         if curr_pat > args.patience:
             break
 
-    if args.tensorboard:
-        logger.close()
+    # if args.tensorboard:
+    #     logger.close()
 
 
 if __name__ == '__main__':

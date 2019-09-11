@@ -2,6 +2,7 @@
 
 import torch
 import torchvision.transforms as transforms
+from torchvision import datasets
 import torch.utils.data as data
 import os
 import pickle
@@ -10,16 +11,50 @@ import nltk
 from PIL import Image
 from build_vocab import Vocabulary
 import random
+import pandas as pd
 import json
-import lmdb
+# import lmdb
 
+scores = pd.read_csv("../data/scored_images.csv")
+
+class ScorerDataset(datasets.ImageFolder):
+    def __init__(self, data_dir, aux_data_dir, transform=None, suff=''):
+        self.ingrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'ingr_vocab.pkl'), 'rb'))
+        super(ScorerDataset, self).__init__(root=data_dir, transform=transform)
+
+    def __getitem__(self, index):
+        path, target = self.samples[index]
+        sample = self.loader(path)
+        if self.transform is not None:
+            sample = self.transform(sample)
+
+        # get the label from the data
+        try:
+            target = scores[scores['FILE_NAME'] == path.split("/")[-1]]['MNS9_NORM'].values[0]
+        except:
+            print("Path:", path)
+
+        return sample, target
+
+    def get_instrs_vocab(self):
+        return self.instrs_vocab
+
+    def get_instrs_vocab_size(self):
+        return 5 #len(self.instrs_vocab)
+
+    def get_ingrs_vocab(self):
+        return [min(w, key=len) if not isinstance(w, str) else w for w in
+                self.ingrs_vocab.idx2word.values()]  # includes 'pad' ingredient
+
+    def get_ingrs_vocab_size(self):
+        return len(self.ingrs_vocab)
 
 class Recipe1MDataset(data.Dataset):
 
     def __init__(self, data_dir, aux_data_dir, split, maxseqlen, maxnuminstrs, maxnumlabels, maxnumims,
                  transform=None, max_num_samples=-1, use_lmdb=False, suff=''):
 
-        self.ingrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'recipe1m_vocab_ingrs.pkl'), 'rb'))
+        self.ingrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'vocab_ingrs.pkl'), 'rb'))
         self.instrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'recipe1m_vocab_toks.pkl'), 'rb'))
         self.dataset = pickle.load(open(os.path.join(aux_data_dir, suff + 'recipe1m_'+split+'.pkl'), 'rb'))
 
@@ -154,22 +189,22 @@ def collate_fn(data):
 
     # Sort a data list by caption length (descending order).
     # data.sort(key=lambda x: len(x[2]), reverse=True)
-    image_input, captions, ingrs_gt, img_id, path, pad_value = zip(*data)
+    image_input, scores = zip(*data)
 
     # Merge images (from tuple of 3D tensor to 4D tensor).
 
-    image_input = torch.stack(image_input, 0)
-    ingrs_gt = torch.stack(ingrs_gt, 0)
+    # image_input = torch.stack(image_input, 0)
+    # ingrs_gt = torch.stack(ingrs_gt, 0)
+    #
+    # # Merge captions (from tuple of 1D tensor to 2D tensor).
+    # lengths = [len(cap) for cap in captions]
+    # targets = torch.ones(len(captions), max(lengths)).long()*pad_value[0]
+    #
+    # for i, cap in enumerate(captions):
+    #     end = lengths[i]
+    #     targets[i, :end] = cap[:end]
 
-    # Merge captions (from tuple of 1D tensor to 2D tensor).
-    lengths = [len(cap) for cap in captions]
-    targets = torch.ones(len(captions), max(lengths)).long()*pad_value[0]
-
-    for i, cap in enumerate(captions):
-        end = lengths[i]
-        targets[i, :end] = cap[:end]
-
-    return image_input, targets, ingrs_gt, img_id, path
+    return image_input, scores
 
 
 def get_loader(data_dir, aux_data_dir, split, maxseqlen,
@@ -179,15 +214,19 @@ def get_loader(data_dir, aux_data_dir, split, maxseqlen,
                use_lmdb=False,
                suff=''):
 
-    dataset = Recipe1MDataset(data_dir=data_dir, aux_data_dir=aux_data_dir, split=split,
-                              maxseqlen=maxseqlen, maxnumlabels=maxnumlabels, maxnuminstrs=maxnuminstrs,
-                              maxnumims=maxnumims,
+    dataset = ScorerDataset(data_dir=data_dir, aux_data_dir=aux_data_dir,
                               transform=transform,
-                              max_num_samples=max_num_samples,
-                              use_lmdb=use_lmdb,
                               suff=suff)
 
+    # dataset = Recipe1MDataset(data_dir=data_dir, aux_data_dir=aux_data_dir, split=split,
+    #                           maxseqlen=maxseqlen, maxnumlabels=maxnumlabels, maxnuminstrs=maxnuminstrs,
+    #                           maxnumims=maxnumims,
+    #                           transform=transform,
+    #                           max_num_samples=max_num_samples,
+    #                           use_lmdb=use_lmdb,
+    #                           suff=suff)
+
     data_loader = torch.utils.data.DataLoader(dataset=dataset,
-                                              batch_size=batch_size, shuffle=shuffle, num_workers=num_workers,
-                                              drop_last=drop_last, collate_fn=collate_fn, pin_memory=True)
+                                              batch_size=batch_size, shuffle=shuffle, num_workers=1,
+                                              drop_last=drop_last, pin_memory=True)
     return data_loader, dataset

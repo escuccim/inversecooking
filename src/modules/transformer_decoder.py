@@ -340,7 +340,7 @@ class DecoderTransformer(nn.Module):
                 return self.sample_beam(ingr_features, ingr_mask, beam, img_features, first_token_value,
                                         replacement, last_token_value)
             else:
-                print ("Beam Search can only be used with batch size of 1. Running greedy or temperature sampling...")
+                print("Beam Search can only be used with batch size of 1. Running greedy or temperature sampling...")
 
         first_word = torch.ones(fs)*first_token_value
 
