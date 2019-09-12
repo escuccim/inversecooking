@@ -159,7 +159,7 @@ class InverseCookingModel(nn.Module):
     def forward(self, img_inputs, gt_scores, sample=False, keep_cnn_gradients=False):
 
         if sample:
-            return self.sample(img_inputs, greedy=True)
+            return self.sample(img_inputs, gt_scores, greedy=True)
 
         # targets = captions[:, 1:]
         # targets = targets.contiguous().view(-1)
@@ -249,43 +249,40 @@ class InverseCookingModel(nn.Module):
 
         return losses
 
-    def sample(self, img_inputs, greedy=True, temperature=1.0, beam=-1, true_ingrs=None):
+    def sample(self, img_inputs, gt_scores, greedy=False):
 
-        outputs = dict()
+        losses = dict()
 
         img_features = self.image_encoder(img_inputs)
 
         if not self.recipe_only:
-            ingr_ids, ingr_probs = self.ingredient_decoder.sample(None, None, greedy=True, temperature=temperature,
-                                                                  beam=-1,
-                                                                  img_features=img_features, first_token_value=0,
-                                                                  replacement=False)
+            ingr_ids, ingr_logits = self.ingredient_decoder.sample(None, None, greedy=True,
+                                                                   temperature=1.0, img_features=img_features,
+                                                                   first_token_value=0, replacement=False)
 
-            # mask ingredients after finding eos
-            sample_mask = mask_from_eos(ingr_ids, eos_value=0, mult_before=False)
-            ingr_ids[sample_mask == 0] = self.pad_value
+            ingr_logits = torch.nn.functional.softmax(ingr_logits, dim=-1)
 
-            outputs['ingr_ids'] = ingr_ids
-            outputs['ingr_probs'] = ingr_probs.data
-
-            mask = sample_mask
-            input_mask = mask.float().unsqueeze(1)
-            input_feats = self.ingredient_encoder(ingr_ids)
+            scores = self.scorer(img_features, ingr_logits)
+            # print("gt_scores", gt_scores)
+            # print("scores", scores)
+            # get the loss for the scores
+            score_loss = self.crit_score(scores.view(-1), gt_scores.float())
+            losses['score_loss'] = score_loss
 
         if self.ingrs_only:
-            return outputs
+            return losses
 
         # option during sampling to use the real ingredients and not the predicted ones to infer the recipe
-        if true_ingrs is not None:
-            input_mask = mask_from_eos(true_ingrs, eos_value=0, mult_before=False)
-            true_ingrs[input_mask == 0] = self.pad_value
-            input_feats = self.ingredient_encoder(true_ingrs)
-            input_mask = input_mask.unsqueeze(1)
+        # if true_ingrs is not None:
+        #     input_mask = mask_from_eos(true_ingrs, eos_value=0, mult_before=False)
+        #     true_ingrs[input_mask == 0] = self.pad_value
+        #     input_feats = self.ingredient_encoder(true_ingrs)
+        #     input_mask = input_mask.unsqueeze(1)
+        #
+        # ids, probs = self.recipe_decoder.sample(input_feats, input_mask, greedy, temperature, beam, img_features, 0,
+        #                                         last_token_value=1)
+        #
+        # outputs['recipe_probs'] = probs.data
+        # outputs['recipe_ids'] = ids
 
-        ids, probs = self.recipe_decoder.sample(input_feats, input_mask, greedy, temperature, beam, img_features, 0,
-                                                last_token_value=1)
-
-        outputs['recipe_probs'] = probs.data
-        outputs['recipe_ids'] = ids
-
-        return outputs
+        return losses

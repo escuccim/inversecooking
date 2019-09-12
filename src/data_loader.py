@@ -215,9 +215,14 @@ def get_loader(data_dir, aux_data_dir, split, maxseqlen,
                use_lmdb=False,
                suff=''):
 
-    dataset = ScorerDataset(data_dir=data_dir, aux_data_dir=aux_data_dir,
-                              transform=transform,
-                              suff=suff)
+    if split == "val":
+        img_dir = "/test_images"
+    else:
+        img_dir = "/train_images"
+
+    dataset = ScorerDataset(data_dir=data_dir + img_dir, aux_data_dir=aux_data_dir,
+                                  transform=transform,
+                                  suff=suff)
 
     # dataset = Recipe1MDataset(data_dir=data_dir, aux_data_dir=aux_data_dir, split=split,
     #                           maxseqlen=maxseqlen, maxnumlabels=maxnumlabels, maxnuminstrs=maxnuminstrs,

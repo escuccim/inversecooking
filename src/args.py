@@ -131,6 +131,10 @@ def get_parser():
                         help='train or evaluate the model only for ingredient prediction')
     parser.set_defaults(ingrs_only=False)
 
+    parser.add_argument('--scorer_only', dest='scorer_only', action='store_true',
+                        help='train or evaluate the model only for scorer')
+    parser.set_defaults(scorer_only=False)
+
     parser.add_argument('--recipe_only', dest='recipe_only', action='store_true',
                         help='train or evaluate the model only for instruction generation')
     parser.set_defaults(recipe_only=False)

@@ -148,17 +148,26 @@ def main(args):
         params = list(model.ingredient_decoder.parameters())
     elif args.recipe_only:
         params = list(model.recipe_decoder.parameters()) + list(model.ingredient_encoder.parameters())
+    elif args.scorer_only:
+        params = list(model.scorer.parameters())
     else:
         params = list(model.recipe_decoder.parameters()) + list(model.ingredient_decoder.parameters()) \
-                 + list(model.ingredient_encoder.parameters())
+                 + list(model.ingredient_encoder.parameters()) + list(model.scorer.parameters())
 
     # only train the linear layer in the encoder if we are not transfering from another model
     if args.transfer_from == '':
         params += list(model.image_encoder.linear.parameters())
     params_cnn = list(model.image_encoder.resnet.parameters())
 
-    print ("CNN params:", sum(p.numel() for p in params_cnn if p.requires_grad))
-    print ("decoder params:", sum(p.numel() for p in params if p.requires_grad))
+    print("CNN params:", sum(p.numel() for p in params_cnn if p.requires_grad))
+    print("decoder params:", sum(p.numel() for p in params if p.requires_grad))
+
+    # TODO (EAS) : Remove this after the new layer has been trained a bit
+    # only train new layer for now
+    params = list(model.scorer.parameters())
+    keep_cnn_gradients = False
+    params_cnn = None
+
     # start optimizing cnn from the beginning
     if params_cnn is not None and args.finetune_after == 0:
         optimizer = torch.optim.Adam([{'params': params}, {'params': params_cnn,
@@ -168,6 +177,7 @@ def main(args):
         print ("Fine tuning resnet")
     else:
         optimizer = torch.optim.Adam(params, lr=args.learning_rate)
+    keep_cnn_gradients = False
 
     if args.resume:
         model_path = os.path.join(args.save_dir, args.project_name, args.model_name, 'checkpoints', 'model.ckpt')
@@ -225,7 +235,8 @@ def main(args):
                                          lr=decay_factor*args.learning_rate)
             keep_cnn_gradients = True
 
-        for split in ['train', 'val']:
+        # for split in ['train', 'val']:
+        for split in ['val']:
 
             if split == 'train':
                 model.train()
@@ -358,13 +369,13 @@ def main(args):
                     start = time.time()
                 del loss, losses
 
-            if split == 'val' and not args.recipe_only:
-                ret_metrics = {'accuracy': [], 'f1': [], 'jaccard': [], 'f1_ingredients': [], 'dice': []}
-                compute_metrics(ret_metrics, error_types,
-                                ['accuracy', 'f1', 'jaccard', 'f1_ingredients', 'dice'], eps=1e-10,
-                                weights=None)
-
-                total_loss_dict['f1'] = ret_metrics['f1']
+            # if split == 'val' and not args.recipe_only:
+            #     ret_metrics = {'accuracy': [], 'f1': [], 'jaccard': [], 'f1_ingredients': [], 'dice': []}
+            #     compute_metrics(ret_metrics, error_types,
+            #                     ['accuracy', 'f1', 'jaccard', 'f1_ingredients', 'dice'], eps=1e-10,
+            #                     weights=None)
+            #
+            #     total_loss_dict['f1'] = ret_metrics['f1']
             # if args.tensorboard:
             #     # 1. Log scalar values (scalar summary)
             #     logger.scalar_summary(mode=split,
@@ -373,9 +384,12 @@ def main(args):
 
         # Save the model's best checkpoint if performance was improved
         es_value = np.mean(total_loss_dict[args.es_metric])
+        # es_value = 0
 
         # save current model as well
         save_model(model, optimizer, checkpoints_dir, suff='')
+        pickle.dump(args, open(os.path.join(checkpoints_dir, 'args.pkl'), 'wb'))
+
         if (args.es_metric == 'loss' and es_value < es_best) or (args.es_metric == 'iou_sample' and es_value > es_best):
             es_best = es_value
             save_model(model, optimizer, checkpoints_dir, suff='best')
