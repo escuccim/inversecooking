@@ -138,7 +138,7 @@ def main(args):
 
     # Build the model
     model = get_model(args, ingr_vocab_size, instrs_vocab_size)
-    model.load_state_dict(torch.load("../data/recipescorer/modelbest.ckpt", map_location=map_loc), strict=False)
+    # model.load_state_dict(torch.load("../data/recipescorer//recipescorer/checkpoints/model.ckpt", map_location=map_loc), strict=False)
     keep_cnn_gradients = False
 
     decay_factor = 1.0
@@ -164,8 +164,8 @@ def main(args):
 
     # TODO (EAS) : Remove this after the new layer has been trained a bit
     # only train new layer for now
-    params = list(model.scorer.parameters())
-    keep_cnn_gradients = False
+    # params = list(model.scorer.parameters())
+    # keep_cnn_gradients = False
     params_cnn = None
 
     # start optimizing cnn from the beginning
@@ -181,8 +181,8 @@ def main(args):
 
     if args.resume:
         model_path = os.path.join(args.save_dir, args.project_name, args.model_name, 'checkpoints', 'model.ckpt')
-        optim_path = os.path.join(args.save_dir, args.project_name, args.model_name, 'checkpoints', 'optim.ckpt')
-        optimizer.load_state_dict(torch.load(optim_path, map_location=map_loc))
+        # optim_path = os.path.join(args.save_dir, args.project_name, args.model_name, 'checkpoints', 'optim.ckpt')
+        # optimizer.load_state_dict(torch.load(optim_path, map_location=map_loc))
         for state in optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
@@ -235,13 +235,14 @@ def main(args):
                                          lr=decay_factor*args.learning_rate)
             keep_cnn_gradients = True
 
-        # for split in ['train', 'val']:
-        for split in ['val']:
+        for split in ['train', 'val']:
 
             if split == 'train':
                 model.train()
             else:
                 model.eval()
+                epoch_losses = []
+
             total_step = len(data_loaders[split])
             loader = iter(data_loaders[split])
 
@@ -275,6 +276,7 @@ def main(args):
                         if not args.recipe_only:
                             outputs = model(img_inputs, gt_scores, sample=True)
                             score_loss = outputs['score_loss']
+                            epoch_losses.append(score_loss.item())
 
                             # ingr_ids_greedy = outputs['ingr_ids']
                             #
@@ -385,6 +387,8 @@ def main(args):
         # Save the model's best checkpoint if performance was improved
         es_value = np.mean(total_loss_dict[args.es_metric])
         # es_value = 0
+
+        print("Epoch:", epoch, "Mean test loss:", np.mean(epoch_losses))
 
         # save current model as well
         save_model(model, optimizer, checkpoints_dir, suff='')

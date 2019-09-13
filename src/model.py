@@ -104,6 +104,8 @@ class RecipeScorer(nn.Module):
 
         # combined FC
         self.fc3 = nn.Linear(4096 * 2, 1)
+        self.dropout1 = nn.Dropout2d(0.25)
+        self.dropout2 = nn.Dropout2d(0.25)
 
         self.relu = nn.LeakyReLU(0.1, inplace=True)
         self.tanh = nn.Tanh()
@@ -115,11 +117,11 @@ class RecipeScorer(nn.Module):
         # print("img_features (reshaped):", img_features.view((img_features.shape[0], -1)).shape)
         # print("ingr_logits (reshaped):", ingr_logits.view((ingr_logits.shape[0], -1)).shape)
         # process the images
-        f1 = self.relu(self.fc1(img_features.view((img_features.shape[0], -1))))
+        f1 = self.dropout1(self.relu(self.fc1(img_features.view((img_features.shape[0], -1)))))
         # print("f1", f1)
 
         # process the ingredients
-        f2 = self.relu(self.fc2(ingr_logits.view((ingr_logits.shape[0], -1))))
+        f2 = self.dropout2(self.relu(self.fc2(ingr_logits.view((ingr_logits.shape[0], -1)))))
         # print("f2", f2)
 
         # combine the embeddings

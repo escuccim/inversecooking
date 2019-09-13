@@ -36,7 +36,7 @@ def get_parser():
 
     parser.add_argument('--image_size', type=int, default=256, help='size to rescale images')
 
-    parser.add_argument('--log_step', type=int , default=10, help='step size for printing log info')
+    parser.add_argument('--log_step', type=int, default=10, help='step size for printing log info')
 
     parser.add_argument('--learning_rate', type=float, default=0.001,
                         help='base learning rate')
